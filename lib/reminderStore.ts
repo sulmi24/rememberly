@@ -28,20 +28,36 @@ interface ReminderStore {
   reminders: Reminder[];
   loading: boolean;
   error: string | null;
+  isOffline: boolean;
   fetchReminders: () => Promise<void>;
   createReminder: (data: CreateReminderData) => Promise<void>;
   completeReminder: (id: string) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
   snoozeReminder: (id: string, minutes: number) => Promise<void>;
+  clearError: () => void;
+}
+
+// Helper function to handle network errors
+function handleNetworkError(error: any): string {
+  console.error('Network error in reminder store:', error);
+  
+  if (error.message?.includes('Failed to fetch') || 
+      error.message?.includes('Network request failed') ||
+      error.message?.includes('NetworkError')) {
+    return 'Unable to connect to the server. Please check your internet connection.';
+  }
+  
+  return error.message || 'An unexpected error occurred. Please try again.';
 }
 
 export const useReminderStore = create<ReminderStore>((set, get) => ({
   reminders: [],
   loading: false,
   error: null,
+  isOffline: false,
 
   fetchReminders: async () => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, isOffline: false });
     
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -60,16 +76,19 @@ export const useReminderStore = create<ReminderStore>((set, get) => ({
 
       set({ reminders: data || [], loading: false });
     } catch (error) {
-      console.error('Error fetching reminders:', error);
+      const errorMessage = handleNetworkError(error);
+      const isNetworkError = errorMessage.includes('Unable to connect');
+      
       set({ 
-        error: error instanceof Error ? error.message : 'Failed to fetch reminders',
-        loading: false 
+        error: errorMessage,
+        loading: false,
+        isOffline: isNetworkError
       });
     }
   },
 
   createReminder: async (data: CreateReminderData) => {
-    set({ error: null });
+    set({ error: null, isOffline: false });
     
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -97,27 +116,32 @@ export const useReminderStore = create<ReminderStore>((set, get) => ({
       if (error) throw error;
 
       // Schedule local notification
-      const notificationData: NotificationData = {
-        reminderId: newReminder.id,
-        noteId: newReminder.note_id || undefined,
-        priority: newReminder.priority,
-      };
+      try {
+        const notificationData: NotificationData = {
+          reminderId: newReminder.id,
+          noteId: newReminder.note_id || undefined,
+          priority: newReminder.priority,
+        };
 
-      const notificationId = await scheduleLocalNotification(
-        newReminder.title,
-        newReminder.description || 'Reminder notification',
-        new Date(newReminder.remind_at),
-        notificationData
-      );
+        const notificationId = await scheduleLocalNotification(
+          newReminder.title,
+          newReminder.description || 'Reminder notification',
+          new Date(newReminder.remind_at),
+          notificationData
+        );
 
-      // Update reminder with notification ID
-      if (notificationId) {
-        await supabase
-          .from('reminders')
-          .update({ notification_id: notificationId })
-          .eq('id', newReminder.id);
-        
-        newReminder.notification_id = notificationId;
+        // Update reminder with notification ID
+        if (notificationId) {
+          await supabase
+            .from('reminders')
+            .update({ notification_id: notificationId })
+            .eq('id', newReminder.id);
+          
+          newReminder.notification_id = notificationId;
+        }
+      } catch (notificationError) {
+        console.warn('Failed to schedule notification:', notificationError);
+        // Continue without notification - don't fail the entire operation
       }
 
       set(state => ({
@@ -126,23 +150,30 @@ export const useReminderStore = create<ReminderStore>((set, get) => ({
         )
       }));
     } catch (error) {
-      console.error('Error creating reminder:', error);
+      const errorMessage = handleNetworkError(error);
+      const isNetworkError = errorMessage.includes('Unable to connect');
+      
       set({ 
-        error: error instanceof Error ? error.message : 'Failed to create reminder'
+        error: errorMessage,
+        isOffline: isNetworkError
       });
       throw error;
     }
   },
 
   completeReminder: async (id: string) => {
-    set({ error: null });
+    set({ error: null, isOffline: false });
     
     try {
       const reminder = get().reminders.find(r => r.id === id);
       
       // Cancel notification if exists
       if (reminder?.notification_id) {
-        await cancelNotification(reminder.notification_id);
+        try {
+          await cancelNotification(reminder.notification_id);
+        } catch (notificationError) {
+          console.warn('Failed to cancel notification:', notificationError);
+        }
       }
 
       const { error } = await supabase
@@ -156,22 +187,29 @@ export const useReminderStore = create<ReminderStore>((set, get) => ({
         reminders: state.reminders.filter(reminder => reminder.id !== id)
       }));
     } catch (error) {
-      console.error('Error completing reminder:', error);
+      const errorMessage = handleNetworkError(error);
+      const isNetworkError = errorMessage.includes('Unable to connect');
+      
       set({ 
-        error: error instanceof Error ? error.message : 'Failed to complete reminder'
+        error: errorMessage,
+        isOffline: isNetworkError
       });
     }
   },
 
   deleteReminder: async (id: string) => {
-    set({ error: null });
+    set({ error: null, isOffline: false });
     
     try {
       const reminder = get().reminders.find(r => r.id === id);
       
       // Cancel notification if exists
       if (reminder?.notification_id) {
-        await cancelNotification(reminder.notification_id);
+        try {
+          await cancelNotification(reminder.notification_id);
+        } catch (notificationError) {
+          console.warn('Failed to cancel notification:', notificationError);
+        }
       }
 
       const { error } = await supabase
@@ -185,15 +223,18 @@ export const useReminderStore = create<ReminderStore>((set, get) => ({
         reminders: state.reminders.filter(reminder => reminder.id !== id)
       }));
     } catch (error) {
-      console.error('Error deleting reminder:', error);
+      const errorMessage = handleNetworkError(error);
+      const isNetworkError = errorMessage.includes('Unable to connect');
+      
       set({ 
-        error: error instanceof Error ? error.message : 'Failed to delete reminder'
+        error: errorMessage,
+        isOffline: isNetworkError
       });
     }
   },
 
   snoozeReminder: async (id: string, minutes: number) => {
-    set({ error: null });
+    set({ error: null, isOffline: false });
     
     try {
       const reminder = get().reminders.find(r => r.id === id);
@@ -203,24 +244,33 @@ export const useReminderStore = create<ReminderStore>((set, get) => ({
 
       // Cancel existing notification
       if (reminder.notification_id) {
-        await cancelNotification(reminder.notification_id);
+        try {
+          await cancelNotification(reminder.notification_id);
+        } catch (notificationError) {
+          console.warn('Failed to cancel notification:', notificationError);
+        }
       }
 
       const newRemindAt = new Date(Date.now() + minutes * 60 * 1000).toISOString();
 
       // Schedule new notification
-      const notificationData: NotificationData = {
-        reminderId: reminder.id,
-        noteId: reminder.note_id || undefined,
-        priority: reminder.priority,
-      };
+      let notificationId: string | null = null;
+      try {
+        const notificationData: NotificationData = {
+          reminderId: reminder.id,
+          noteId: reminder.note_id || undefined,
+          priority: reminder.priority,
+        };
 
-      const notificationId = await scheduleLocalNotification(
-        reminder.title,
-        reminder.description || 'Reminder notification',
-        new Date(newRemindAt),
-        notificationData
-      );
+        notificationId = await scheduleLocalNotification(
+          reminder.title,
+          reminder.description || 'Reminder notification',
+          new Date(newRemindAt),
+          notificationData
+        );
+      } catch (notificationError) {
+        console.warn('Failed to schedule new notification:', notificationError);
+      }
 
       // Update reminder in database
       const { error } = await supabase
@@ -241,10 +291,15 @@ export const useReminderStore = create<ReminderStore>((set, get) => ({
         ).sort((a, b) => new Date(a.remind_at).getTime() - new Date(b.remind_at).getTime())
       }));
     } catch (error) {
-      console.error('Error snoozing reminder:', error);
+      const errorMessage = handleNetworkError(error);
+      const isNetworkError = errorMessage.includes('Unable to connect');
+      
       set({ 
-        error: error instanceof Error ? error.message : 'Failed to snooze reminder'
+        error: errorMessage,
+        isOffline: isNetworkError
       });
     }
   },
+
+  clearError: () => set({ error: null }),
 }));

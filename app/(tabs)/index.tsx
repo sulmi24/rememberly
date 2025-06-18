@@ -12,13 +12,14 @@ import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNotesStore } from '@/lib/store';
 import { getCurrentUser, signOut } from '@/lib/auth';
-import { Brain, Plus, FileText, Link2, Image, LogOut } from 'lucide-react-native';
+import { Brain, Plus, FileText, Link2, Image, LogOut, Wifi, WifiOff } from 'lucide-react-native';
 import { NoteCard } from '@/components/NoteCard';
 
 export default function HomeScreen() {
-  const { notes, loading, fetchNotes, error } = useNotesStore();
+  const { notes, loading, fetchNotes, error, isOffline } = useNotesStore();
   const [user, setUser] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const isMounted = useRef(true);
 
   useEffect(() => {
@@ -33,13 +34,24 @@ export default function HomeScreen() {
   }, []);
 
   async function checkAuth() {
-    const { user } = await getCurrentUser();
-    if (!user) {
-      router.replace('/auth/login');
-    } else {
-      if (isMounted.current) {
-        setUser(user);
+    try {
+      const { user, error } = await getCurrentUser();
+      if (error) {
+        setAuthError(error.message);
+        return;
       }
+      
+      if (!user) {
+        router.replace('/auth/login');
+      } else {
+        if (isMounted.current) {
+          setUser(user);
+          setAuthError(null);
+        }
+      }
+    } catch (error) {
+      console.error('Auth check error:', error);
+      setAuthError('Failed to check authentication status');
     }
   }
 
@@ -54,8 +66,12 @@ export default function HomeScreen() {
   }
 
   async function handleSignOut() {
-    await signOut();
-    router.replace('/auth/login');
+    try {
+      await signOut();
+      router.replace('/auth/login');
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
   }
 
   const recentNotes = notes.slice(0, 5);
@@ -73,13 +89,28 @@ export default function HomeScreen() {
           <View style={styles.headerContent}>
             <View>
               <Text style={styles.greeting}>Welcome back!</Text>
-              <Text style={styles.userEmail}>{user?.email}</Text>
+              <Text style={styles.userEmail}>{user?.email || 'Loading...'}</Text>
             </View>
-            <TouchableOpacity onPress={handleSignOut} style={styles.signOutButton}>
-              <LogOut size={20} color="#6B7280" strokeWidth={2} />
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              {isOffline && (
+                <View style={styles.offlineIndicator}>
+                  <WifiOff size={16} color="#DC2626" strokeWidth={2} />
+                  <Text style={styles.offlineText}>Offline</Text>
+                </View>
+              )}
+              <TouchableOpacity onPress={handleSignOut} style={styles.signOutButton}>
+                <LogOut size={20} color="#6B7280" strokeWidth={2} />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
+
+        {/* Connection Status */}
+        {authError && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>Authentication: {authError}</Text>
+          </View>
+        )}
 
         {/* Quick Actions */}
         <View style={styles.section}>
@@ -141,6 +172,11 @@ export default function HomeScreen() {
           {error && (
             <View style={styles.errorContainer}>
               <Text style={styles.errorText}>{error}</Text>
+              {isOffline && (
+                <Text style={styles.errorSubtext}>
+                  You're currently offline. Some features may not be available.
+                </Text>
+              )}
             </View>
           )}
 
@@ -153,17 +189,24 @@ export default function HomeScreen() {
           ) : (
             <View style={styles.emptyState}>
               <Brain size={48} color="#9CA3AF" strokeWidth={2} />
-              <Text style={styles.emptyTitle}>No notes yet</Text>
-              <Text style={styles.emptySubtitle}>
-                Create your first note to get started with Rememberly
+              <Text style={styles.emptyTitle}>
+                {isOffline ? 'No cached notes available' : 'No notes yet'}
               </Text>
-              <TouchableOpacity
-                style={styles.createButton}
-                onPress={() => router.push('/(tabs)/create')}
-              >
-                <Plus size={20} color="#ffffff" strokeWidth={2} />
-                <Text style={styles.createButtonText}>Create Note</Text>
-              </TouchableOpacity>
+              <Text style={styles.emptySubtitle}>
+                {isOffline 
+                  ? 'Connect to the internet to sync your notes'
+                  : 'Create your first note to get started with Rememberly'
+                }
+              </Text>
+              {!isOffline && (
+                <TouchableOpacity
+                  style={styles.createButton}
+                  onPress={() => router.push('/(tabs)/create')}
+                >
+                  <Plus size={20} color="#ffffff" strokeWidth={2} />
+                  <Text style={styles.createButtonText}>Create Note</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
@@ -191,6 +234,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  offlineIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  offlineText: {
+    fontSize: 12,
+    fontFamily: 'Inter-Medium',
+    color: '#DC2626',
   },
   greeting: {
     fontSize: 24,
@@ -305,5 +367,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Medium',
     color: '#DC2626',
     textAlign: 'center',
+  },
+  errorSubtext: {
+    fontSize: 12,
+    fontFamily: 'Inter-Regular',
+    color: '#DC2626',
+    textAlign: 'center',
+    marginTop: 4,
+    opacity: 0.8,
   },
 });
