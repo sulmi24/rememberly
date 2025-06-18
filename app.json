@@ -21,8 +21,8 @@
       "typedRoutes": true
     },
     "extra": {
-      "supabaseUrl": "https://your-project-ref.supabase.co",
-      "supabaseAnonKey": "your-anon-key-here"
+      "supabaseUrl": "https://lkeequxsxsoastroxqnv.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrZWVxdXhzeHNvYXN0cm94cW52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwOTY2MjgsImV4cCI6MjA2NTY3MjYyOH0.yrGxU4WorL-SZZF2b-tAhGiL1lrTqnWp8VZOhiszQYM"
     }
   }
 }
